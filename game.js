@@ -6,6 +6,12 @@ const BAIL = 50;
 
 const PLAYER_COLORS = ["#ff5252", "#4fc3f7", "#ffca28", "#66bb6a", "#ab47bc", "#ff8a65"];
 
+const BOT_DIFFICULTY = {
+  conservative: { buyReserve: 300, auctionMaxPct: 0.75, auctionReserve: 300, buildReserve: 300, tradeOfferMult: 1.15, tradeAcceptThreshold: 1.05 },
+  balanced: { buyReserve: 80, auctionMaxPct: 0.9, auctionReserve: 100, buildReserve: 150, tradeOfferMult: 1.3, tradeAcceptThreshold: 0.95 },
+  aggressive: { buyReserve: 20, auctionMaxPct: 1.05, auctionReserve: 30, buildReserve: 50, tradeOfferMult: 1.5, tradeAcceptThreshold: 0.85 }
+};
+
 const state = {
   players: [],
   currentPlayer: 0,
@@ -14,8 +20,19 @@ const state = {
   gameOver: false,
   pendingTile: null,
   awaitingBuyDecision: false,
-  auction: null
+  auction: null,
+  botDifficulty: "balanced",
+  fastMode: false,
+  stats: { turns: 0, rentPaid: {}, rentByProperty: {} }
 };
+
+function botConfig() {
+  return BOT_DIFFICULTY[state.botDifficulty] || BOT_DIFFICULTY.balanced;
+}
+
+function speed(ms) {
+  return state.fastMode ? Math.round(ms / 4) : ms;
+}
 
 const tileEls = {};
 const tokenEls = {};
@@ -98,7 +115,7 @@ function animateDice(d1, d2) {
     renderDie(die2, d2);
     die1.classList.remove("rolling");
     die2.classList.remove("rolling");
-  }, 300);
+  }, speed(300));
 }
 
 function showMoneyPopup(playerId, amount) {
@@ -148,11 +165,14 @@ function tileIcon(tile) {
 
 function renderBoard() {
   const board = document.getElementById("board");
+  const appEl = document.querySelector(".app");
+  const sidebar = document.querySelector(".sidebar");
+  if (sidebar && appEl) appEl.appendChild(sidebar);
   board.innerHTML = "";
 
   const center = document.createElement("div");
   center.className = "center";
-  center.innerHTML = "<h1>מונופול</h1>";
+  center.innerHTML = '<div id="centerControlsSlot" class="center-controls-slot"></div>';
   board.appendChild(center);
 
   BOARD.forEach(tile => {
@@ -199,6 +219,82 @@ function renderBoard() {
     tileEls[0].classList.add("occupied-" + p.token);
   });
   layoutTokensInTile(tileEls[0]);
+  relocateControls();
+}
+
+function relocateControls() {
+  const slot = document.getElementById("centerControlsSlot");
+  const sidebar = document.querySelector(".sidebar");
+  if (slot && sidebar) {
+    slot.appendChild(sidebar);
+  }
+}
+
+function canActNow() {
+  return state.currentPlayer === 0 && !state.gameOver && !state.awaitingBuyDecision && !state.auction &&
+    document.getElementById("tradeOverlay").style.display !== "flex";
+}
+
+function canBuildOn(tileId, playerIdx) {
+  const tile = BOARD[tileId];
+  const own = state.ownership[tileId];
+  if (tile.type !== "property" || !own || own.owner !== playerIdx || own.mortgaged) return false;
+  if (!isMonopoly(playerIdx, tile.group)) return false;
+  const groupTiles = getGroupTiles(tile.group);
+  const minHouses = Math.min(...groupTiles.map(t => (state.ownership[t.id] || { houses: 0 }).houses));
+  return own.houses === minHouses && own.houses < 5;
+}
+
+function canSellHouseOn(tileId, playerIdx) {
+  const tile = BOARD[tileId];
+  const own = state.ownership[tileId];
+  if (tile.type !== "property" || !own || own.owner !== playerIdx || own.houses === 0) return false;
+  const groupTiles = getGroupTiles(tile.group);
+  const maxHouses = Math.max(...groupTiles.map(t => (state.ownership[t.id] || { houses: 0 }).houses));
+  return own.houses === maxHouses;
+}
+
+function canMortgage(tileId, playerIdx) {
+  const own = state.ownership[tileId];
+  return !!(own && own.owner === playerIdx && !own.mortgaged && own.houses === 0);
+}
+
+function canUnmortgage(tileId, playerIdx) {
+  const own = state.ownership[tileId];
+  return !!(own && own.owner === playerIdx && own.mortgaged);
+}
+
+function sellHouse(tileId) {
+  const tile = BOARD[tileId];
+  const p = player();
+  state.ownership[tileId].houses -= 1;
+  changeMoney(p, Math.floor(tile.houseCost / 2));
+  log(`${p.name} מכר בית ב${tile.name} בחזרה לבנק`, "mortgage");
+  updateTileVisual(tileId);
+  renderPlayers();
+}
+
+function mortgageProperty(tileId) {
+  const tile = BOARD[tileId];
+  const p = player();
+  state.ownership[tileId].mortgaged = true;
+  const amount = Math.floor(tile.price / 2);
+  changeMoney(p, amount);
+  log(`${p.name} משכן את ${tile.name} תמורת ₪${amount}`, "mortgage");
+  updateTileVisual(tileId);
+  renderPlayers();
+}
+
+function unmortgageProperty(tileId) {
+  const tile = BOARD[tileId];
+  const p = player();
+  const amount = Math.ceil((tile.price / 2) * 1.1);
+  if (p.money < amount) return;
+  changeMoney(p, -amount);
+  state.ownership[tileId].mortgaged = false;
+  log(`${p.name} פדה את המשכון על ${tile.name} תמורת ₪${amount}`, "mortgage");
+  updateTileVisual(tileId);
+  renderPlayers();
 }
 
 function showPropertyModal(tileId) {
@@ -216,14 +312,45 @@ function showPropertyModal(tileId) {
     rows = `<div class="rent-row"><span>חברה אחת</span><span>4x סכום קוביות</span></div><div class="rent-row"><span>שתי חברות</span><span>10x סכום קוביות</span></div>`;
   }
   const ownerText = own ? `בבעלות ${state.players[own.owner].name}${own.mortgaged ? " (ממושכן)" : ""}` : "ללא בעלים";
+
+  let actionsHtml = "";
+  if (canActNow()) {
+    if (canBuildOn(tileId, 0)) {
+      actionsHtml += `<button class="btn success modal-action-btn" data-action="build" data-tile="${tileId}">בנה ${own.houses === 4 ? "מלון" : "בית"} (₪${tile.houseCost})</button>`;
+    }
+    if (canSellHouseOn(tileId, 0)) {
+      actionsHtml += `<button class="btn secondary modal-action-btn" data-action="sellhouse" data-tile="${tileId}">מכור ${own.houses >= 5 ? "מלון" : "בית"} (+₪${Math.floor(tile.houseCost / 2)})</button>`;
+    }
+    if (canMortgage(tileId, 0)) {
+      actionsHtml += `<button class="btn secondary modal-action-btn" data-action="mortgage" data-tile="${tileId}">משכן נכס (+₪${Math.floor(tile.price / 2)})</button>`;
+    }
+    if (canUnmortgage(tileId, 0)) {
+      const cost = Math.ceil((tile.price / 2) * 1.1);
+      actionsHtml += `<button class="btn secondary modal-action-btn" data-action="unmortgage" data-tile="${tileId}" ${state.players[0].money < cost ? "disabled" : ""}>פדה משכון (-₪${cost})</button>`;
+    }
+  }
+
   document.getElementById("modalTitle").textContent = tile.name;
   document.getElementById("modalBody").innerHTML = `
     <div class="prop-price">מחיר: ₪${tile.price}</div>
     <div class="rent-table">${rows}</div>
     <div class="prop-owner">${ownerText}</div>
+    ${actionsHtml ? `<div class="modal-actions">${actionsHtml}</div>` : ""}
   `;
   document.getElementById("modalOverlay").style.display = "flex";
 }
+
+document.getElementById("modalBody").addEventListener("click", e => {
+  const btn = e.target.closest(".modal-action-btn");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const tileId = parseInt(btn.dataset.tile, 10);
+  if (action === "build") buildHouse(tileId);
+  else if (action === "sellhouse") sellHouse(tileId);
+  else if (action === "mortgage") mortgageProperty(tileId);
+  else if (action === "unmortgage") unmortgageProperty(tileId);
+  showPropertyModal(tileId);
+});
 
 function updateActiveToken() {
   state.players.forEach((p, idx) => {
@@ -381,7 +508,6 @@ function setButtons(cfg) {
   document.getElementById("buyBtn").style.display = cfg.buy ? "inline-block" : "none";
   document.getElementById("skipBtn").style.display = cfg.buy ? "inline-block" : "none";
   document.getElementById("payBailBtn").style.display = cfg.bail ? "inline-block" : "none";
-  document.getElementById("buildBtn").style.display = cfg.build ? "inline-block" : "none";
   document.getElementById("endTurnBtn").style.display = cfg.end ? "inline-block" : "none";
   const canTrade = cfg.trade && state.players.some((pl, i) => i !== state.currentPlayer && !pl.bankrupt);
   document.getElementById("tradeBtn").style.display = canTrade ? "inline-block" : "none";
@@ -399,19 +525,6 @@ function findBuildable(playerIdx) {
   return null;
 }
 
-function refreshBuildButton() {
-  const p = player();
-  const buildable = findBuildable(state.currentPlayer);
-  const btn = document.getElementById("buildBtn");
-  if (buildable && p.money >= buildable.houseCost) {
-    btn.style.display = "inline-block";
-    btn.textContent = `בנה ${state.ownership[buildable.id].houses === 4 ? "מלון" : "בית"} ב${buildable.name} (₪${buildable.houseCost})`;
-    btn.onclick = () => buildHouse(buildable.id);
-  } else {
-    btn.style.display = "none";
-  }
-}
-
 function buildHouse(tileId) {
   const p = player();
   const tile = BOARD[tileId];
@@ -420,7 +533,6 @@ function buildHouse(tileId) {
   log(`${p.name} בנה ${state.ownership[tileId].houses >= 5 ? "מלון" : "בית"} ב${tile.name}`, "build");
   updateTileVisual(tileId);
   renderPlayers();
-  refreshBuildButton();
 }
 
 function checkBankrupt(p) {
@@ -448,7 +560,7 @@ function checkBankrupt(p) {
       state.gameOver = true;
       const winner = remaining[0];
       log(`${winner.name} מנצח את המשחק! 🎉`, "bankrupt");
-      showModal("המשחק נגמר", `${winner.name} ניצח!`);
+      showGameOverModal(winner);
       setButtons({});
     }
     renderPlayers();
@@ -458,9 +570,11 @@ function checkBankrupt(p) {
   return false;
 }
 
-function payRent(payer, owner, amount) {
+function payRent(payer, owner, amount, tileId) {
   changeMoney(payer, -amount);
   changeMoney(owner, amount);
+  state.stats.rentPaid[payer.id] = (state.stats.rentPaid[payer.id] || 0) + amount;
+  if (tileId !== undefined) state.stats.rentByProperty[tileId] = (state.stats.rentByProperty[tileId] || 0) + amount;
   log(`${payer.name} שילם ₪${amount} שכירות ל${owner.name}`, "rent");
   renderPlayers();
   checkBankrupt(payer);
@@ -469,6 +583,30 @@ function payRent(payer, owner, amount) {
 function showModal(title, body) {
   document.getElementById("modalTitle").textContent = title;
   document.getElementById("modalBody").textContent = body;
+  document.getElementById("modalOverlay").style.display = "flex";
+}
+
+function showGameOverModal(winner) {
+  const rentRows = state.players.map(p => `<div class="rent-row"><span>${p.name}</span><span>₪${state.stats.rentPaid[p.id] || 0}</span></div>`).join("");
+  let bestPropId = null;
+  let bestAmt = 0;
+  Object.keys(state.stats.rentByProperty).forEach(tid => {
+    if (state.stats.rentByProperty[tid] > bestAmt) {
+      bestAmt = state.stats.rentByProperty[tid];
+      bestPropId = tid;
+    }
+  });
+  const bestPropText = bestPropId !== null ? `${BOARD[bestPropId].name} (₪${bestAmt})` : "אין נתונים";
+  document.getElementById("modalTitle").textContent = "המשחק נגמר";
+  document.getElementById("modalBody").innerHTML = `
+    <div class="prop-price">${winner.name} ניצח! 🎉</div>
+    <div class="rent-table">
+      <div class="rent-row"><span>סה"כ תורות</span><span>${state.stats.turns}</span></div>
+      <div class="rent-row"><span>הנכס הכי רווחי</span><span>${bestPropText}</span></div>
+    </div>
+    <div class="prop-owner">שכירות ששולמה על ידי כל שחקן:</div>
+    <div class="rent-table">${rentRows}</div>
+  `;
   document.getElementById("modalOverlay").style.display = "flex";
 }
 
@@ -540,7 +678,7 @@ function resolveTile(p, isPrimaryLanding = true) {
       const owner = state.players[own.owner];
       const diceTotal = state.lastDice ? state.lastDice[0] + state.lastDice[1] : 7;
       const rent = calcRent(tile, diceTotal);
-      payRent(p, owner, rent);
+      payRent(p, owner, rent, tile.id);
     }
   } else if (tile.type === "tax") {
     changeMoney(p, -tile.amount);
@@ -576,13 +714,12 @@ function afterLandingResolved() {
   } else {
     const canRollAgain = state.doublesStreak > 0 && state.doublesStreak < 3;
     setButtons({ roll: canRollAgain, end: !canRollAgain, trade: true });
-    refreshBuildButton();
   }
 }
 
 function offerBuy(p, tile) {
   if (p.isBot) {
-    const decision = p.money - tile.price >= 80;
+    const decision = p.money - tile.price >= botConfig().buyReserve;
     if (decision) {
       buyProperty(p, tile);
     } else {
@@ -660,7 +797,7 @@ function runAuctionTurn() {
   if (!a) return;
   updateAuctionPanel();
   if (state.players[a.turn].isBot) {
-    setTimeout(botAuctionAction, 700);
+    setTimeout(botAuctionAction, speed(700));
   }
 }
 
@@ -669,9 +806,10 @@ function botAuctionAction() {
   if (!a) return;
   const tile = BOARD[a.tileId];
   const bot = state.players[a.turn];
-  const maxWilling = Math.floor(tile.price * 0.9);
+  const cfg = botConfig();
+  const maxWilling = Math.floor(tile.price * cfg.auctionMaxPct);
   const nextBid = a.highBid + 10;
-  if (a.highBidder !== a.turn && nextBid <= maxWilling && bot.money - nextBid >= 100) {
+  if (a.highBidder !== a.turn && nextBid <= maxWilling && bot.money - nextBid >= cfg.auctionReserve) {
     auctionBid(a.turn, nextBid);
   } else {
     auctionPass(a.turn);
@@ -749,7 +887,7 @@ function botConsiderInitiateTrade(bot) {
     const ownedByBot = tiles.filter(t => state.ownership[t.id] && state.ownership[t.id].owner === bot.id);
     const missingFromHuman = tiles.find(t => state.ownership[t.id] && state.ownership[t.id].owner === 0);
     if (ownedByBot.length === tiles.length - 1 && missingFromHuman) {
-      const offerCash = Math.round((missingFromHuman.price * 1.3) / 10) * 10;
+      const offerCash = Math.round((missingFromHuman.price * botConfig().tradeOfferMult) / 10) * 10;
       if (bot.money >= offerCash + 50) {
         proposeBotTrade(bot, missingFromHuman, offerCash);
         return true;
@@ -773,7 +911,7 @@ document.getElementById("incomingTradeAcceptBtn").addEventListener("click", () =
   log(`קיבלת את הצעת המסחר של ${o.bot.name}!`, "buy");
   document.getElementById("incomingTradeOverlay").style.display = "none";
   state.incomingOffer = null;
-  setTimeout(botTurn, 500);
+  setTimeout(botTurn, speed(500));
 });
 
 document.getElementById("incomingTradeDeclineBtn").addEventListener("click", () => {
@@ -782,7 +920,7 @@ document.getElementById("incomingTradeDeclineBtn").addEventListener("click", () 
   log(`דחית את הצעת המסחר של ${o.bot.name}`, "info");
   document.getElementById("incomingTradeOverlay").style.display = "none";
   state.incomingOffer = null;
-  setTimeout(botTurn, 500);
+  setTimeout(botTurn, speed(500));
 });
 
 function openTradePanel() {
@@ -837,15 +975,16 @@ function executeTrade(a, b, aPropIds, bPropIds, aCash, bCash) {
 }
 
 function evaluateBotTrade(bot, yourPropIds, theirPropIds, yourCash, theirCash) {
+  const threshold = botConfig().tradeAcceptThreshold;
   const botGets = tradeValue(yourPropIds, yourCash);
   const botGives = tradeValue(theirPropIds, theirCash);
-  const accept = botGets >= botGives * 0.95;
+  const accept = botGets >= botGives * threshold;
   if (accept) {
     executeTrade(player(), bot, yourPropIds, theirPropIds, yourCash, theirCash);
     log(`${bot.name} קיבל את הצעת המסחר!`, "buy");
     return;
   }
-  const deficit = Math.ceil((botGives * 0.95 - botGets) / 10) * 10;
+  const deficit = Math.ceil((botGives * threshold - botGets) / 10) * 10;
   const humanMoney = state.players[0].money;
   if (deficit > 0 && yourCash + deficit <= humanMoney) {
     log(`${bot.name} דוחה, אבל מציע: תוסיף ₪${deficit} במזומן ואני אסכים`, "info");
@@ -910,7 +1049,7 @@ function movePlayerBySteps(p, steps, onComplete) {
       changeMoney(p, GO_BONUS);
       log(`${p.name} עבר בהתחלה, קיבל ₪${GO_BONUS}`, "bonus");
     }
-    setTimeout(stepOnce, 120);
+    setTimeout(stepOnce, speed(120));
   }
   stepOnce();
 }
@@ -1007,6 +1146,7 @@ function showBankruptBanner(name) {
 
 function startTurn() {
   if (state.gameOver) return;
+  state.stats.turns += 1;
   state.pendingCounter = null;
   document.getElementById("counterOfferBtn").style.display = "none";
   renderPlayers();
@@ -1026,7 +1166,7 @@ function startTurn() {
       if (!botConsiderInitiateTrade(p)) {
         botTurn();
       }
-    }, 800);
+    }, speed(800));
     return;
   }
 
@@ -1062,7 +1202,7 @@ function botPostRoll() {
   let built = true;
   while (built) {
     const buildable = findBuildable(state.currentPlayer);
-    if (buildable && p.money - buildable.houseCost >= 150) {
+    if (buildable && p.money - buildable.houseCost >= botConfig().buildReserve) {
       buildHouse(buildable.id);
     } else {
       built = false;
@@ -1071,14 +1211,15 @@ function botPostRoll() {
   setTimeout(() => {
     if (state.doublesStreak > 0 && state.doublesStreak < 3) {
       log(`${p.name} מקבל תור נוסף בזכות כפולות`, "dice");
-      setTimeout(botTurn, 700);
+      setTimeout(botTurn, speed(700));
     } else {
       endTurn();
     }
-  }, 600);
+  }, speed(600));
 }
 
 let selectedBotCount = 1;
+let selectedDifficulty = "balanced";
 
 function updateNameInputsVisibility() {
   document.querySelectorAll(".bot-name-input").forEach(input => {
@@ -1094,6 +1235,18 @@ document.querySelectorAll(".count-btn").forEach(btn => {
     btn.classList.add("selected");
     updateNameInputsVisibility();
   });
+});
+
+document.querySelectorAll(".diff-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    selectedDifficulty = btn.dataset.diff;
+    document.querySelectorAll(".diff-btn").forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+  });
+});
+
+document.getElementById("fastModeToggle").addEventListener("change", e => {
+  state.fastMode = e.target.checked;
 });
 
 document.getElementById("startGameBtn").addEventListener("click", () => {
@@ -1120,6 +1273,8 @@ function loadGame(saved) {
   state.ownership = saved.ownership;
   state.doublesStreak = saved.doublesStreak || 0;
   state.gameOver = saved.gameOver || false;
+  state.botDifficulty = saved.botDifficulty || "balanced";
+  state.stats = saved.stats || { turns: 0, rentPaid: {}, rentByProperty: {} };
   renderBoard();
   renderPlayers();
   startTurn();
@@ -1145,7 +1300,9 @@ function saveGame() {
     currentPlayer: state.currentPlayer,
     ownership: state.ownership,
     doublesStreak: state.doublesStreak,
-    gameOver: state.gameOver
+    gameOver: state.gameOver,
+    botDifficulty: state.botDifficulty,
+    stats: state.stats
   }));
 }
 
@@ -1164,6 +1321,8 @@ function initGame(botCount) {
   state.doublesStreak = 0;
   state.ownership = {};
   state.gameOver = false;
+  state.botDifficulty = selectedDifficulty;
+  state.stats = { turns: 0, rentPaid: {}, rentByProperty: {} };
   renderBoard();
   renderPlayers();
   startTurn();
