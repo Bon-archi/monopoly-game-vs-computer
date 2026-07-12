@@ -7,22 +7,72 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="setupScreen" class="setup-screen">
+  <div class="setup-card">
+    <h1>מונופול</h1>
+    <div id="resumeSection" class="resume-section" style="display:none">
+      <p>נמצא משחק שמור</p>
+      <button id="resumeGameBtn" class="btn success">המשך משחק</button>
+      <p class="resume-or">— או —</p>
+    </div>
+    <p>כמה בוטים ישחקו נגדך?</p>
+    <div class="bot-count-selector" id="botCountSelector">
+      <button class="count-btn selected" data-count="1">1</button>
+      <button class="count-btn" data-count="2">2</button>
+      <button class="count-btn" data-count="3">3</button>
+      <button class="count-btn" data-count="4">4</button>
+      <button class="count-btn" data-count="5">5</button>
+    </div>
+    <div class="name-inputs" id="nameInputs">
+      <input type="text" id="humanNameInput" class="name-input" placeholder="השם שלך" value="אתה" />
+      <input type="text" class="name-input bot-name-input" data-bot="1" placeholder="שם בוט 1" value="מחשב 1" />
+      <input type="text" class="name-input bot-name-input" data-bot="2" placeholder="שם בוט 2" value="מחשב 2" style="display:none" />
+      <input type="text" class="name-input bot-name-input" data-bot="3" placeholder="שם בוט 3" value="מחשב 3" style="display:none" />
+      <input type="text" class="name-input bot-name-input" data-bot="4" placeholder="שם בוט 4" value="מחשב 4" style="display:none" />
+      <input type="text" class="name-input bot-name-input" data-bot="5" placeholder="שם בוט 5" value="מחשב 5" style="display:none" />
+    </div>
+    <button id="startGameBtn" class="btn primary">התחל משחק</button>
+  </div>
+</div>
+<div id="turnBanner" class="turn-banner"></div>
+<div id="cardBanner" class="card-banner"></div>
+<div id="bankruptBanner" class="bankrupt-banner"></div>
 <div class="app">
   <div class="board-wrap">
     <div id="board" class="board"></div>
   </div>
 
   <div class="sidebar">
+    <button id="newGameBtn" class="btn secondary new-game-btn">🔄 משחק חדש</button>
+
     <div class="players" id="players"></div>
 
+    <div class="leaderboard" id="leaderboard"></div>
+
+    <div class="monopoly-progress" id="monopolyProgress"></div>
+
     <div class="controls" id="controls">
-      <div class="dice" id="dice">🎲 🎲</div>
+      <div class="dice-row" id="diceRow">
+        <div class="die" id="die1"></div>
+        <div class="die" id="die2"></div>
+      </div>
       <button id="rollBtn" class="btn primary">הטל קוביות</button>
       <button id="buyBtn" class="btn success" style="display:none">קנה נכס</button>
       <button id="skipBtn" class="btn secondary" style="display:none">ותר על הנכס</button>
       <button id="payBailBtn" class="btn secondary" style="display:none">שלם 50 לשחרור מהכלא</button>
       <button id="buildBtn" class="btn success" style="display:none">בנה בית</button>
+      <button id="tradeBtn" class="btn secondary" style="display:none">🤝 הצע מסחר</button>
+      <button id="counterOfferBtn" class="btn success" style="display:none"></button>
       <button id="endTurnBtn" class="btn secondary" style="display:none">סיים תור</button>
+    </div>
+
+    <div class="auction-panel" id="auctionPanel" style="display:none">
+      <div class="auction-info" id="auctionInfo"></div>
+      <div class="auction-controls">
+        <input type="number" id="auctionBidInput" class="auction-bid-input" min="10" step="10" />
+        <button id="auctionBidBtn" class="btn success">הצע</button>
+        <button id="auctionPassBtn" class="btn secondary">פרוש</button>
+      </div>
     </div>
 
     <div class="log" id="log"></div>
@@ -34,6 +84,42 @@
     <h3 id="modalTitle"></h3>
     <p id="modalBody"></p>
     <button id="modalCloseBtn" class="btn primary">אישור</button>
+  </div>
+</div>
+
+<div id="tradeOverlay" class="modal-overlay" style="display:none">
+  <div class="modal trade-modal">
+    <h3>הצעת מסחר</h3>
+    <label class="trade-partner-label">סחר עם:
+      <select id="tradePartnerSelect"></select>
+    </label>
+    <div class="trade-columns">
+      <div class="trade-col">
+        <h4>אתה נותן</h4>
+        <div id="tradeYourProps" class="trade-prop-list"></div>
+        <label class="trade-cash-label">מזומן: <input type="number" id="tradeYourCash" min="0" value="0" /></label>
+      </div>
+      <div class="trade-col">
+        <h4>אתה מקבל</h4>
+        <div id="tradeTheirProps" class="trade-prop-list"></div>
+        <label class="trade-cash-label">מזומן: <input type="number" id="tradeTheirCash" min="0" value="0" /></label>
+      </div>
+    </div>
+    <div class="trade-actions">
+      <button id="tradeProposeBtn" class="btn success">הצע עסקה</button>
+      <button id="tradeCancelBtn" class="btn secondary">ביטול</button>
+    </div>
+  </div>
+</div>
+
+<div id="incomingTradeOverlay" class="modal-overlay" style="display:none">
+  <div class="modal">
+    <h3 id="incomingTradeTitle"></h3>
+    <p id="incomingTradeBody"></p>
+    <div class="trade-actions">
+      <button id="incomingTradeAcceptBtn" class="btn success">קבל</button>
+      <button id="incomingTradeDeclineBtn" class="btn secondary">דחה</button>
+    </div>
   </div>
 </div>
 
