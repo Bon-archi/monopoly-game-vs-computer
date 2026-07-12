@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>מונופול נגד המחשב</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <div class="board-wrap">
+    <div id="board" class="board"></div>
+  </div>
+
+  <div class="sidebar">
+    <div class="players" id="players"></div>
+
+    <div class="controls" id="controls">
+      <div class="dice" id="dice">🎲 🎲</div>
+      <button id="rollBtn" class="btn primary">הטל קוביות</button>
+      <button id="buyBtn" class="btn success" style="display:none">קנה נכס</button>
+      <button id="skipBtn" class="btn secondary" style="display:none">ותר על הנכס</button>
+      <button id="payBailBtn" class="btn secondary" style="display:none">שלם 50 לשחרור מהכלא</button>
+      <button id="buildBtn" class="btn success" style="display:none">בנה בית</button>
+      <button id="endTurnBtn" class="btn secondary" style="display:none">סיים תור</button>
+    </div>
+
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<div id="modalOverlay" class="modal-overlay" style="display:none">
+  <div class="modal">
+    <h3 id="modalTitle"></h3>
+    <p id="modalBody"></p>
+    <button id="modalCloseBtn" class="btn primary">אישור</button>
+  </div>
+</div>
+
+<script src="board-data.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
