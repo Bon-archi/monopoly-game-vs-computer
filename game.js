@@ -199,7 +199,7 @@ function renderBoard() {
     }
     if (tile.type === "property" || tile.type === "railroad" || tile.type === "utility") {
       inner += `<div class="owner-stripe" data-owner="${tile.id}"></div>`;
-      inner += `<div class="mortgage-overlay" data-mortgage="${tile.id}">🔒 משועבד</div>`;
+      inner += `<div class="mortgage-overlay" data-mortgage="${tile.id}"><div class="mortgage-lock">🔒 משועבד</div><div class="mortgage-hint">לחץ לפדיון</div></div>`;
     }
     el.innerHTML = inner;
     if (tile.type === "property" || tile.type === "railroad" || tile.type === "utility") {

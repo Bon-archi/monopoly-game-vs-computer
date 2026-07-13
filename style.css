@@ -316,14 +316,31 @@ body {
   inset: 0;
   background: repeating-linear-gradient(45deg, rgba(15, 15, 25, 0.85), rgba(15, 15, 25, 0.85) 4px, rgba(70, 70, 95, 0.85) 4px, rgba(70, 70, 95, 0.85) 8px);
   display: none;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
-  font-size: 9px;
+  z-index: 4;
+}
+
+.tile .mortgage-lock {
+  font-size: clamp(6px, 1.7vw, 9px);
   font-weight: 800;
   color: #fff;
   text-shadow: 0 1px 2px #000;
-  z-index: 4;
+}
+
+.tile .mortgage-hint {
+  font-size: clamp(4.5px, 1.3vw, 7px);
+  font-weight: 600;
+  color: #f5d90a;
+  text-shadow: 0 1px 2px #000;
+  animation: mortgage-hint-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes mortgage-hint-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 
 .tile .houses {
