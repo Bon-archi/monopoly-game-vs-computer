@@ -362,22 +362,41 @@ function renderPlayers() {
   updateActiveToken();
   const container = document.getElementById("players");
   container.innerHTML = "";
+  const worths = state.players.map((p, idx) => calcNetWorth(idx));
+  const rankOf = {};
+  state.players
+    .map((p, idx) => idx)
+    .sort((a, b) => worths[b] - worths[a])
+    .forEach((idx, i) => { rankOf[idx] = i + 1; });
+
   state.players.forEach((p, idx) => {
     const card = document.createElement("div");
     card.className = "player-card" + (idx === state.currentPlayer && !state.gameOver ? " active" : "") + (p.bankrupt ? " bankrupt" : "");
-    const propNames = Object.keys(state.ownership)
-      .filter(tid => state.ownership[tid].owner === idx)
-      .map(tid => BOARD[tid].name);
+    const ownedIds = Object.keys(state.ownership).filter(tid => state.ownership[tid].owner === idx);
+    const swatches = ownedIds.map(tid => {
+      const t = BOARD[tid];
+      const own = state.ownership[tid];
+      const color = t.group ? GROUP_COLORS[t.group] : GROUP_COLORS[t.type === "railroad" ? "railroad" : "utility"];
+      return `<span class="prop-swatch${own.mortgaged ? " mortgaged" : ""}" style="background:${color}" title="${t.name}"></span>`;
+    }).join("");
     card.innerHTML = `
-      <h3><span class="player-dot" style="background:${PLAYER_COLORS[idx]}"></span>${p.name} ${p.bankrupt ? "(פשט רגל)" : ""}${idx === state.currentPlayer && p.isBot && !state.gameOver ? '<span class="thinking-indicator">🤔 חושב...</span>' : ""}</h3>
-      <div class="money">₪${p.money}</div>
-      <div class="props">${propNames.length ? propNames.join(", ") : "אין נכסים"}</div>
-      ${p.inJail ? '<div class="props">🚔 בכלא</div>' : ""}
+      <div class="pc-top">
+        <span class="rank-badge">#${rankOf[idx]}</span>
+        <span class="player-dot" style="background:${PLAYER_COLORS[idx]}"></span>
+        <span class="pc-name">${p.name}</span>
+        ${p.inJail ? '<span title="בכלא">🚔</span>' : ""}
+        ${idx === state.currentPlayer && p.isBot && !state.gameOver ? '<span class="thinking-indicator">🤔</span>' : ""}
+      </div>
+      <div class="pc-money-row">
+        <span class="money">₪${p.money}</span>
+        <span class="pc-worth">שווי ₪${worths[idx]}</span>
+      </div>
+      <div class="pc-props">${ownedIds.length ? swatches : '<span class="pc-noprops">אין נכסים</span>'}</div>
+      ${p.bankrupt ? '<div class="pc-bankrupt">💥 פשט רגל</div>' : ""}
     `;
     container.appendChild(card);
   });
   renderMonopolyProgress();
-  renderLeaderboard();
   saveGame();
 }
 
@@ -392,21 +411,6 @@ function calcNetWorth(idx) {
     }
   });
   return worth;
-}
-
-function renderLeaderboard() {
-  const ranked = state.players
-    .map((p, idx) => ({ p, idx, worth: calcNetWorth(idx) }))
-    .sort((a, b) => b.worth - a.worth);
-  const rows = ranked.map((r, rank) => `
-    <div class="leaderboard-row${r.p.bankrupt ? " bankrupt" : ""}">
-      <span class="lb-rank">#${rank + 1}</span>
-      <span class="player-dot" style="background:${PLAYER_COLORS[r.idx]}"></span>
-      <span class="lb-name">${r.p.name}</span>
-      <span class="lb-worth">₪${r.worth}</span>
-    </div>
-  `).join("");
-  document.getElementById("leaderboard").innerHTML = `<div class="progress-title">דירוג שווי נטו</div>${rows}`;
 }
 
 function renderMonopolyProgress() {
